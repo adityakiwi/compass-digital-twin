@@ -1,4 +1,8 @@
 import type { ClinicalState } from "@/types/patient";
+// COMPAT SHIM (Phase 1A): see inputContract.ts. Each v22Absent() call passes
+// the exact in-band value the field held when absent pre-Phase-1A, so model
+// outputs are bit-identical. Phases 2–7 replace these with vNext imputation.
+import { v22Absent } from "./inputContract";
 import { logPsad, normalizeMaxCorePct, sigmoid } from "@/lib/utils/math";
 import {
   imagingFlagsForSide,
@@ -69,15 +73,15 @@ export function predictSviPatient(S: ClinicalState): number {
     gg2,
     gg3,
     gg45,
-    normalizeMaxCorePct(S.maxcore),
-    Math.max(S.pirads, 2),
-    S.mri_epe,
-    S.mri_svi,
+    normalizeMaxCorePct(v22Absent(S.maxcore, 0)),
+    Math.max(v22Absent(S.pirads, 2), 2),
+    v22Absent(S.mri_epe, 0),
+    v22Absent(S.mri_svi, 0),
     S.mus_ece,
     S.psma_epe,
     dec_imp,
     dec_avail,
-    S.cores,
+    v22Absent(S.cores, 0),
   ];
   // Standardized betas — locked 2026-05-03
   const c = [
@@ -116,18 +120,18 @@ export function predictSviSide(
     side === "left"
       ? S.cores_left !== undefined && S.cores_left !== null
         ? S.cores_left
-        : Math.round(S.cores / 2)
+        : Math.round(v22Absent(S.cores, 0) / 2)
       : S.cores_right !== undefined && S.cores_right !== null
         ? S.cores_right
-        : Math.round(S.cores / 2);
+        : Math.round(v22Absent(S.cores, 0) / 2);
   let mc_side =
     side === "left"
       ? S.mc_left !== undefined && S.mc_left !== null
         ? S.mc_left
-        : S.maxcore
+        : v22Absent(S.maxcore, 0)
       : S.mc_right !== undefined && S.mc_right !== null
         ? S.mc_right
-        : S.maxcore;
+        : v22Absent(S.maxcore, 0);
   mc_side = normalizeMaxCorePct(mc_side);
   const linear_side =
     side === "left"
@@ -147,9 +151,10 @@ export function predictSviSide(
     if (l.source === "MUS") musOnSide = true;
   }
 
+  const piradsRaw = v22Absent(S.pirads, 2);
   const pirads_side = mriOnSide
-    ? Math.max(S.pirads, 2)
-    : Math.max(S.pirads - 2, 2);
+    ? Math.max(piradsRaw, 2)
+    : Math.max(piradsRaw - 2, 2);
   const mri_epe_side = mriOnSide ? (S.mri_epe || 0) : 0;
   const mri_svi_side = mriOnSide ? (S.mri_svi || 0) : 0;
   const mus_ece_side = musOnSide ? (S.mus_ece || 0) : 0;

@@ -1,3 +1,4 @@
+import { isObserved } from "@/lib/models/inputContract";
 import { usePatientStore } from "@/store/patientStore";
 import { useUiStore } from "@/store/uiStore";
 import { deriveClinicalFromLesions, lesionsFromRows } from "@/lib/utils/normalization";
@@ -37,12 +38,12 @@ export function printReport() {
     "3": "Irregular",
     "4": "Bulge",
   };
-  const hasMriDetail = S.mri_size > 0 || S.mri_abutment >= 0 || S.mri_adc > 0;
+  const hasMriDetail = S.mri_size > 0 || (isObserved(S.mri_abutment) && S.mri_abutment >= 0) || (isObserved(S.mri_adc) && S.mri_adc > 0);
   if (hasMriDetail) {
     patHtml += `<table style="margin-top:4px"><tr><th>MRI Size</th><th>Abutment</th><th>ADC Mean</th><th>MRI EPE</th><th>MRI SVI</th></tr>`;
     patHtml += `<tr><td>${S.mri_size > 0 ? (S.mri_size * 10).toFixed(0) + " mm" : "--"}</td>`;
-    patHtml += `<td>${abLabels[String(S.mri_abutment)] ?? "--"}</td>`;
-    patHtml += `<td>${S.mri_adc > 0 ? S.mri_adc : "--"}</td>`;
+    patHtml += `<td>${abLabels[String(S.mri_abutment ?? -1)] ?? "--"}</td>`;
+    patHtml += `<td>${isObserved(S.mri_adc) && S.mri_adc > 0 ? S.mri_adc : "--"}</td>`;
     patHtml += `<td>${S.mri_epe ? "Yes" : "No"}</td>`;
     patHtml += `<td>${S.mri_svi ? "Yes" : "No"}</td></tr></table>`;
   }
