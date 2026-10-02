@@ -21,7 +21,7 @@ export function printReport() {
     lesionsFromRows(entry.lesionRows),
   );
 
-  const pct = (v: number) => Math.round(v * 100) + "%";
+  const pct = (v: number) => (Number.isFinite(v) ? Math.round(v * 100) + "%" : "N/A");
   const rk = (v: number) =>
     v < 0.15 ? "#228B22" : v < 0.3 ? "#DAA520" : "#DC143C";
 
