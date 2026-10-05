@@ -1,6 +1,6 @@
 import { mapZoneDataToThree } from "@/lib/compass/mapZoneData";
 import { getNsGradeZoneAware } from "@/lib/compass/nsGrade";
-import { predictBcrPreop } from "@/lib/models/bcr";
+import { predictBcrCox } from "@/lib/models/vnext/bcrCox";
 import { predictEceVNext } from "@/lib/models/vnext/ece";
 import { predictSviVNext } from "@/lib/models/vnext/svi";
 import { sviSideFromInputs } from "@/lib/models/vnext/sviSide";
@@ -112,7 +112,12 @@ export function runCompassModels(
   const psmL = psmLv.ok ? psmLv.probability : NaN;
   const psmR = psmRv.ok ? psmRv.probability : NaN;
 
-  const bcr = clamp(predictBcrPreop(S), 0.03, 0.75);
+  // Preoperative BCR: Cox model, 12/24/36-month risk. No clamp; NaN when
+  // required inputs are missing.
+  const bcrV = predictBcrCox(S);
+  const bcr12 = bcrV.ok ? bcrV.risk12 : NaN;
+  const bcr24 = bcrV.ok ? bcrV.risk24 : NaN;
+  const bcr36 = bcrV.ok ? bcrV.risk36 : NaN;
 
   const predictions: CompassPredictions = {
     ece,
@@ -120,7 +125,9 @@ export function runCompassModels(
     upgrade,
     psmL,
     psmR,
-    bcr,
+    bcr12,
+    bcr24,
+    bcr36,
     lni,
     extensive,
     nsL,
