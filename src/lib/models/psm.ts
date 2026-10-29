@@ -1,18 +1,12 @@
 import type { ClinicalState } from "@/types/patient";
+// COMPAT SHIM (Phase 1A): see inputContract.ts. Each v22Absent() call passes
+// the exact in-band value the field held when absent pre-Phase-1A, so model
+// outputs are bit-identical. Phases 2–7 replace these with vNext imputation.
+import { v22Absent } from "./inputContract";
 import { logPsad, normalizeMaxCorePct, sigmoid } from "@/lib/utils/math";
+import { PSM as PSM_W, weightsToArrays } from "./weights";
 
-const PSM = {
-  i: -1.251,
-  c: [0.2791, 0.0866, 0.0445, -0.058, 0.1216, -0.0168, 0.12, -0.0341, -0.0429, 0.3391],
-  m: [
-    -1.6137, 0.398, 0.2566, 0.2418, 50.7988, 6.1908, 4.0773, 0.1497, 0.0428,
-    0.4671,
-  ],
-  s: [
-    0.709, 0.4895, 0.4367, 0.4282, 32.3931, 4.2325, 0.852, 0.3567, 0.2023,
-    0.4989,
-  ],
-} as const;
+const PSM = weightsToArrays(PSM_W);
 
 export function predictPsm(S: ClinicalState): number {
   const log_psad = logPsad(S.psa, S.vol);
@@ -24,11 +18,11 @@ export function predictPsm(S: ClinicalState): number {
     gg2,
     gg3,
     gg45,
-    normalizeMaxCorePct(S.maxcore),
-    S.cores,
-    Math.max(S.pirads, 2),
-    S.mri_epe,
-    S.mri_svi,
+    normalizeMaxCorePct(v22Absent(S.maxcore, 0)),
+    v22Absent(S.cores, 0),
+    Math.max(v22Absent(S.pirads, 2), 2),
+    v22Absent(S.mri_epe, 0),
+    v22Absent(S.mri_svi, 0),
     S.bilateral,
   ];
   let L = PSM.i;

@@ -1,24 +1,23 @@
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { ClinicalWorkspace } from "@/components/ClinicalWorkspace";
 import { ControlsOverlay } from "@/components/ControlsOverlay";
-import { InsightsWorkspace } from "@/components/InsightsWorkspace";
 import { AppHeader } from "@/components/layout/AppHeader";
 import { MobileTabBar } from "@/components/layout/MobileTabBar";
-import { SidePanel } from "@/components/SidePanel";
+import { OutcomesWorkspace } from "@/components/OutcomesWorkspace";
 import { ThreeCanvas } from "@/components/ThreeCanvas";
 import { ZoneLabelsOverlay } from "@/components/ZoneLabelsOverlay";
 import { CaseLog } from "@/components/CaseLog";
 import { InfoPanel } from "@/components/InfoPanel";
 import { ReferencePanel } from "@/components/ReferencePanel";
-import { FunctionalOutcomesWorkspace } from "@/components/FunctionalOutcomesWorkspace";
+import { PredictionPanel } from "@/components/PredictionPanel";
+import { WelcomeScreen } from "@/components/WelcomeScreen";
+import { ZoneInputWizard } from "@/components/ZoneInputWizard";
 import { PREDICTION_EXPLANATIONS } from "@/lib/compass/explainPrediction";
 import {
   deriveClinicalFromLesions,
   lesionsFromRows,
 } from "@/lib/utils/normalization";
 import { clinicalStateFromRecord } from "@/lib/compass/clinicalFromRecord";
-import patientsCatalog from "@/data/patients.json";
 import {
   hydrateFromLocalStorage,
   hydratePatientsFromCaseLog,
@@ -28,9 +27,12 @@ import {
 import { useUiStore } from "@/store/uiStore";
 import { cn } from "@/lib/utils";
 
-/** Offset above mobile tab bar (h-16) + safe area */
+/**
+ * Offset above mobile chrome (tab bar h-16 + control pills h-9 + small gap + safe area).
+ * Used so the dim/info readout doesn't collide with the bottom-anchored pill cluster.
+ */
 const MOBILE_CHROME_BOTTOM =
-  "max-lg:bottom-[calc(0.75rem+4rem+env(safe-area-inset-bottom,0px))]";
+  "max-lg:bottom-[calc(0.5rem+4rem+2.5rem+env(safe-area-inset-bottom,0px))]";
 
 function DimOverlay() {
   const patients = usePatientStore((s) => s.patients);
@@ -66,7 +68,6 @@ function DimOverlay() {
 }
 
 export default function App() {
-  const bootstrapFromJson = usePatientStore((s) => s.bootstrapFromJson);
   const infoOpen = useUiStore((s) => s.infoOpen);
   const setInfoOpen = useUiStore((s) => s.setInfoOpen);
   const caseLogOpen = useUiStore((s) => s.caseLogOpen);
@@ -75,8 +76,9 @@ export default function App() {
   const setReferenceOpen = useUiStore((s) => s.setReferenceOpen);
   const explainKey = useUiStore((s) => s.explainKey);
   const setExplainKey = useUiStore((s) => s.setExplainKey);
+  const welcomeOpen = useUiStore((s) => s.welcomeOpen);
   const dark = useUiStore((s) => s.dark);
-  const mobileWorkspace = useUiStore((s) => s.mobileWorkspace);
+  const desktopTab = useUiStore((s) => s.desktopTab);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -86,13 +88,10 @@ export default function App() {
     hydrateFromLocalStorage();
     const st = usePatientStore.getState();
     if (st.patients.length === 0) {
-      bootstrapFromJson(
-        patientsCatalog.patients as {
-          id: string;
-          name: string;
-          record: import("@/types/patient").Prostate3DInputV1;
-        }[],
-      );
+      // Start from a blank case (no defaults that the vNext models would read
+      // as real negatives), not the v22 template in patients.json.
+      st.newCase();
+      usePatientStore.setState({ loading: false });
     } else {
       st.recompute();
       usePatientStore.setState({ loading: false });
@@ -100,84 +99,82 @@ export default function App() {
     // Load saved library entries (full records) then fall back to case log snapshots.
     hydratePatientLibrary();
     hydratePatientsFromCaseLog();
-  }, [bootstrapFromJson]);
+  }, []);
+
+  const onPredictions = desktopTab === "predictions";
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden bg-background">
       <AppHeader />
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:flex-row">
-        <SidePanel />
+      {/*
+        Single content area — ThreeCanvas mounted once here so the WebGL context
+        is never destroyed when switching tabs or workspaces. The canvas wrapper
+        resizes (instead of remounts) when the active tab changes.
+      */}
+      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
 
-        <main className="relative flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden">
-          {/*
-            Viewer stays mounted with real dimensions on small screens (absolute fill)
-            so WebGL resize/orbit/zoom keep working when switching Data / Results / 3D tabs.
-          */}
-          <div
-            className={cn(
-              "relative z-0 min-h-0 min-w-0 w-full flex-1 bg-muted/20",
-              "max-lg:absolute max-lg:inset-0",
-              "lg:relative lg:flex lg:min-h-0",
-            )}
-          >
-            <div className="absolute inset-0 min-h-0 min-w-0">
-              <ThreeCanvas />
-            </div>
+        {/* ── ThreeCanvas background (always mounted, z-0) ──────────────── */}
+        {/*
+          Default: full-screen (covered by panels on input/outcomes tabs).
+          Predictions tab: occupies the right half on desktop, bottom half on mobile.
+        */}
+        <div
+          className={cn(
+            "absolute z-0 bg-muted/20",
+            "inset-0",
+            onPredictions && "lg:left-1/2",
+            onPredictions && "max-lg:top-1/2",
+          )}
+        >
+          <div className="absolute inset-0 min-h-0 min-w-0">
+            <ThreeCanvas />
+          </div>
+          {/* Controls/labels: visible on the predictions tab */}
+          <div className={cn(!onPredictions && "hidden")}>
             <ControlsOverlay />
             <ZoneLabelsOverlay />
             <DimOverlay />
           </div>
+        </div>
 
-          <div
-            className={cn(
-              "relative z-10 min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden overscroll-contain bg-muted/20 app-scroll dark:bg-background",
-              "max-lg:absolute max-lg:inset-0",
-              mobileWorkspace === "insights" ? "max-lg:flex max-lg:flex-col" : "max-lg:hidden",
-              "lg:hidden",
-            )}
-          >
-            <InsightsWorkspace />
-          </div>
+        {/* ── Input tab ────────────────────────────────────────────────── */}
+        <div
+          className={cn(
+            "absolute inset-0 z-10 overflow-hidden bg-background",
+            desktopTab === "input" ? "flex flex-col" : "hidden",
+          )}
+        >
+          <ZoneInputWizard />
+        </div>
 
-          <div
-            className={cn(
-              "relative z-10 min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden overscroll-contain bg-muted/20 app-scroll dark:bg-background",
-              "max-lg:absolute max-lg:inset-0",
-              mobileWorkspace === "clinical" ? "max-lg:flex max-lg:flex-col" : "max-lg:hidden",
-              "lg:hidden",
-            )}
-          >
-            <ClinicalWorkspace compact />
-          </div>
+        {/* ── Predictions tab: PredictionPanel (left/top) | 3D (right/bottom) */}
+        <div
+          className={cn(
+            "absolute z-10 overflow-y-auto overflow-x-hidden overscroll-contain bg-background app-scroll px-5 py-5",
+            onPredictions ? "block" : "hidden",
+            // Desktop: left half. Mobile: top half.
+            "lg:left-0 lg:right-1/2 lg:top-0 lg:bottom-0",
+            "max-lg:top-0 max-lg:bottom-1/2 max-lg:left-0 max-lg:right-0",
+          )}
+        >
+          <PredictionPanel />
+        </div>
 
-          {/* Outcomes tab — mobile only */}
-          <div
-            className={cn(
-              "relative z-10 min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden overscroll-contain bg-muted/20 app-scroll dark:bg-background",
-              "max-lg:absolute max-lg:inset-0",
-              mobileWorkspace === "outcomes" ? "max-lg:flex max-lg:flex-col" : "max-lg:hidden",
-              "lg:hidden",
-            )}
-          >
-            <FunctionalOutcomesWorkspace />
-          </div>
+        {/* ── Outcomes tab: full-width split workspace ──────────────────── */}
+        <div
+          className={cn(
+            "absolute inset-0 z-10 overflow-hidden bg-background",
+            desktopTab === "outcomes" ? "flex" : "hidden",
+          )}
+        >
+          <OutcomesWorkspace />
+        </div>
 
-          {/* Reference tab — mobile only */}
-          <div
-            className={cn(
-              "relative z-10 min-h-0 w-full flex-1",
-              "max-lg:absolute max-lg:inset-0",
-              mobileWorkspace === "reference" ? "max-lg:flex max-lg:flex-col" : "max-lg:hidden",
-              "lg:hidden",
-            )}
-          >
-            {mobileWorkspace === "reference" && <ReferencePanel />}
-          </div>
-        </main>
       </div>
 
       <MobileTabBar />
+
 
       {infoOpen && (
         <InfoPanel onClose={() => setInfoOpen(false)} />
@@ -190,6 +187,8 @@ export default function App() {
       {referenceOpen && (
         <ReferencePanel modal onClose={() => setReferenceOpen(false)} />
       )}
+
+      {welcomeOpen && <WelcomeScreen />}
 
       {explainKey && (
         <div

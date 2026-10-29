@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "start": "./run-dev.sh",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
@@ -23,6 +24,7 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.460.0",
+    "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.53.2",
@@ -32,8 +34,8 @@
     "zustand": "^5.0.1"
   },
   "devDependencies": {
-    "@types/node": "^22.9.0",
     "@eslint/js": "^9.13.0",
+    "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/three": "^0.170.0",

@@ -1,59 +1,24 @@
 import type { ClinicalState } from "@/types/patient";
 import { clamp, logPsad, normalizeMaxCorePct, sigmoid } from "@/lib/utils/math";
+// COMPAT SHIM (Phase 1A) — v22 treats an absent predictor as a fixed in-band
+// number. Each call below passes the exact value that field held when absent
+// before Phase 1A, so these models return bit-identical results. Phases 2–7
+// replace each site with the frozen vNext imputation mean.
+import { v22Absent } from "./inputContract";
 import {
   imagingFlagsForSide,
   type CollectedLesion,
 } from "@/lib/utils/normalization";
+import {
+  ECE_PATIENT as ECE_PATIENT_W,
+  ECE_SIDE as ECE_SIDE_W,
+  EXTENSIVE_ECE as EXTENSIVE_ECE_W,
+  weightsToArrays,
+} from "./weights";
 
-/** Patient-level ECE (standardized logistic) */
-const ECE_PATIENT = {
-  i: -0.7423,
-  c: [
-    0.5186, 0.3464, 0.5279, 0.4644, 0.2302, 0.2541, 0.0726, 0.453, 0.0936,
-    0.0732, 0.1174, 0.2069, 0.3213,
-  ],
-  m: [
-    -1.6174, 0.397, 0.2603, 0.2389, 51.1131, 4.0824, 0.1499, 0.0428, 0.1071,
-    0.0264, 0.2834, 0.6446, 0.2372,
-  ],
-  s: [
-    0.7068, 0.4893, 0.4388, 0.4264, 32.2602, 0.8493, 0.357, 0.2025, 0.3092,
-    0.1602, 0.5672, 0.1175, 0.4254,
-  ],
-} as const;
-
-/** Side-specific ECE v2 */
-const ECE_SIDE = {
-  i: -1.6557,
-  c: [
-    0.381, 0.255, 0.3625, 0.3768, 0.1414, 0.1683, 0.1917, -0.028, 0.1063,
-    0.1471, 0.2045, -0.0204,
-  ],
-  m: [
-    -1.6339, 0.2645, 0.1434, 0.1285, 37.0968, 1.4227, 2.9354, 0.0438, 0.0483,
-    0.0981, 0.0401, 0.6018,
-  ],
-  s: [
-    0.6811, 0.4411, 0.3505, 0.3347, 36.2759, 1.8524, 1.0145, 0.2047, 0.2144,
-    0.3191, 0.1962, 0.4895,
-  ],
-} as const;
-
-const EXTENSIVE_ECE = {
-  i: -0.1975,
-  c: [
-    0.3742, 0.094, 0.1132, 0.0391, -0.3013, 0.2486, 0.0412, -0.0677, 0.2421,
-    0.3411,
-  ],
-  m: [
-    -1.3727, 3.022, 66.4566, 7.2467, 14.1211, 0.2775, 4.3128, 0.2379, 0.1013,
-    0.1806,
-  ],
-  s: [
-    0.7027, 1.1124, 27.6234, 4.9687, 14.6296, 0.4478, 1.0213, 0.4258, 0.3018,
-    0.3847,
-  ],
-} as const;
+const ECE_PATIENT    = weightsToArrays(ECE_PATIENT_W);
+const ECE_SIDE       = weightsToArrays(ECE_SIDE_W);
+const EXTENSIVE_ECE  = weightsToArrays(EXTENSIVE_ECE_W);
 
 function linearPredict(
   intercept: number,
@@ -74,11 +39,14 @@ function linearPredict(
 }
 
 function mriDetailLogitDelta(S: ClinicalState): number {
+  const abutment = v22Absent(S.mri_abutment, -1);
+  const adc = v22Absent(S.mri_adc, 0);
+  const mriEpe = v22Absent(S.mri_epe, 0);
   let d = 0;
   if (S.mri_size > 0) d += 0.636 * (S.mri_size - 1.37);
-  if (S.mri_abutment >= 0) d += 0.171 * (S.mri_abutment - 1.75);
-  if (S.mri_adc > 0) d += -0.00023 * (S.mri_adc - 767);
-  if (S.mri_abutment >= 3 && !S.mri_epe) d += 0.35;
+  if (abutment >= 0) d += 0.171 * (abutment - 1.75);
+  if (adc > 0) d += -0.00023 * (adc - 767);
+  if (abutment >= 3 && !mriEpe) d += 0.35;
   return d;
 }
 
@@ -107,7 +75,7 @@ function psmaDetailLogitDelta(S: ClinicalState): number {
 
 export function predictEcePatient(S: ClinicalState): number {
   const log_psad = logPsad(S.psa, S.vol);
-  const mc = normalizeMaxCorePct(S.maxcore);
+  const mc = normalizeMaxCorePct(v22Absent(S.maxcore, 0));
   const gg2 = S.gg === 2 ? 1 : 0;
   const gg3 = S.gg === 3 ? 1 : 0;
   const gg45 = S.gg >= 4 ? 1 : 0;
@@ -121,9 +89,9 @@ export function predictEcePatient(S: ClinicalState): number {
     gg3,
     gg45,
     mc,
-    Math.max(S.pirads, 2),
-    S.mri_epe,
-    S.mri_svi,
+    Math.max(v22Absent(S.pirads, 2), 2),
+    v22Absent(S.mri_epe, 0),
+    v22Absent(S.mri_svi, 0),
     S.mus_ece,
     S.psma_epe,
     ece_conc,
@@ -162,18 +130,18 @@ export function predictEceSide(
     side === "left"
       ? S.cores_left !== undefined && S.cores_left !== null
         ? S.cores_left
-        : Math.round(S.cores / 2)
+        : Math.round(v22Absent(S.cores, 0) / 2)
       : S.cores_right !== undefined && S.cores_right !== null
         ? S.cores_right
-        : Math.round(S.cores / 2);
+        : Math.round(v22Absent(S.cores, 0) / 2);
   let mc_side =
     side === "left"
       ? S.mc_left !== undefined && S.mc_left !== null
         ? S.mc_left
-        : S.maxcore
+        : v22Absent(S.maxcore, 0)
       : S.mc_right !== undefined && S.mc_right !== null
         ? S.mc_right
-        : S.maxcore;
+        : v22Absent(S.maxcore, 0);
   mc_side = normalizeMaxCorePct(mc_side);
   const gg2 = gg_side === 2 ? 1 : 0;
   const gg3 = gg_side === 3 ? 1 : 0;
@@ -192,7 +160,7 @@ export function predictEceSide(
     if (l.source === "PSMA") psmaOnSide = true;
   }
 
-  const pirads_side = mriOnSide ? Math.max(S.pirads, 2) : 2;
+  const pirads_side = mriOnSide ? Math.max(v22Absent(S.pirads, 2), 2) : 2;
   const mri_epe_side = mriOnSide ? (S.mri_epe || 0) : 0;
   const mus_ece_side = musOnSide ? (S.mus_ece || 0) : 0;
   const psma_epe_side = psmaOnSide ? (S.psma_epe || 0) : 0;
@@ -210,7 +178,7 @@ export function predictEceSide(
     mri_epe_side,
     mus_ece_side,
     ece_conc_side,
-    S.mri_svi,
+    v22Absent(S.mri_svi, 0),
     imaging_ipsi,
   ];
   let L = linearPredict(
@@ -228,17 +196,17 @@ export function predictEceSide(
 
 export function predictExtensiveEce(S: ClinicalState): number {
   const log_psad = logPsad(S.psa, S.vol);
-  const mc = normalizeMaxCorePct(S.maxcore);
+  const mc = normalizeMaxCorePct(v22Absent(S.maxcore, 0));
   const vals = [
     log_psad,
     S.gg,
     mc,
-    S.cores,
+    v22Absent(S.cores, 0),
     S.linear_mm,
     S.bilateral,
-    Math.max(S.pirads, 2),
-    S.mri_epe,
-    S.mri_svi,
+    Math.max(v22Absent(S.pirads, 2), 2),
+    v22Absent(S.mri_epe, 0),
+    v22Absent(S.mri_svi, 0),
     S.mus_ece,
   ];
   const L = linearPredict(

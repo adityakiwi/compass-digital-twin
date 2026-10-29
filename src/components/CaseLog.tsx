@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 const CASE_LOG_KEY = "compass_cases";
 
-interface CaseRecord {
+export interface CaseRecord {
   id: string;
   date: string;
   // inputs
@@ -16,22 +16,22 @@ interface CaseRecord {
   vol: number;
   psad: string;
   gg: number;
-  cores: number;
-  maxcore: number;
+  cores: number | null;
+  maxcore: number | null;
   linear: number;
-  pirads: number;
+  pirads: number | null;
   laterality: string;
   gg_left: number;
   gg_right: number;
-  mri_epe: number;
-  mri_svi: number;
+  mri_epe: number | null;
+  mri_svi: number | null;
   mri_size: number;
-  mri_abutment: number;
-  mri_adc: number;
+  mri_abutment: number | null;
+  mri_adc: number | null;
   mus_ece: number;
   mus_svi: number;
   suv: number;
-  psma_ln: number;
+  psma_ln: number | null;
   psma_lesions: number;
   psma_base: number;
   psma_svi: number;
@@ -39,13 +39,13 @@ interface CaseRecord {
   ev_base: number;
   lesion_count: number;
   // predictions
-  pred_ece: number;
-  pred_ece_l: number;
-  pred_ece_r: number;
+  pred_ece: number | null;
+  pred_ece_l: number | null;
+  pred_ece_r: number | null;
   pred_svi: number;
-  pred_upgrade: number;
-  pred_psm: number;
-  pred_bcr: number;
+  pred_upgrade: number | null;
+  pred_psm: number | null;
+  pred_bcr: number | null;
   pred_lni: number;
   ns_left: number;
   ns_right: number;
@@ -203,13 +203,13 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
       ev_lesions: S.ev_n_lesions,
       ev_base: S.ev_at_base,
       lesion_count: entry.lesionRows.length,
-      pred_ece: Math.round(predictions.ece * 100),
-      pred_ece_l: Math.round(predictions.eceL * 100),
-      pred_ece_r: Math.round(predictions.eceR * 100),
+      pred_ece: Number.isFinite(predictions.ece) ? Math.round(predictions.ece * 100) : null,
+      pred_ece_l: Number.isFinite(predictions.eceL) ? Math.round(predictions.eceL * 100) : null,
+      pred_ece_r: Number.isFinite(predictions.eceR) ? Math.round(predictions.eceR * 100) : null,
       pred_svi: Math.round(predictions.svi * 100),
-      pred_upgrade: Math.round(predictions.upgrade * 100),
-      pred_psm: Math.round(predictions.psm * 100),
-      pred_bcr: Math.round(predictions.bcr * 100),
+      pred_upgrade: Number.isFinite(predictions.upgrade) ? Math.round(predictions.upgrade * 100) : null,
+      pred_psm: Number.isFinite(predictions.psmL) && Number.isFinite(predictions.psmR) ? Math.round(Math.max(predictions.psmL, predictions.psmR) * 100) : null,
+      pred_bcr: Number.isFinite(predictions.bcr36) ? Math.round(predictions.bcr36 * 100) : null,
       pred_lni: Math.round(predictions.lni * 100),
       ns_left: predictions.nsL,
       ns_right: predictions.nsR,
@@ -306,9 +306,9 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
   const total = cases.length;
   const withPath = cases.filter((c) => c.path_ece !== null).length;
   const eceAccuracy = (() => {
-    const evaled = cases.filter((c) => c.path_ece !== null);
+    const evaled = cases.filter((c) => c.path_ece !== null && c.pred_ece !== null);
     if (evaled.length === 0) return null;
-    const correct = evaled.filter((c) => (c.pred_ece >= 50 ? 1 : 0) === c.path_ece).length;
+    const correct = evaled.filter((c) => ((c.pred_ece ?? 0) >= 50 ? 1 : 0) === c.path_ece).length;
     return Math.round((correct / evaled.length) * 100);
   })();
 
@@ -327,8 +327,7 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[200] overflow-y-auto bg-background/97 p-4 sm:p-8"
-      style={{ backdropFilter: "blur(4px)" }}
+      className="fixed inset-0 z-[200] overflow-y-auto bg-background p-4 sm:p-8"
     >
       <Button
         type="button"
@@ -344,7 +343,8 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
       <div className="mx-auto max-w-4xl">
         <h2 className="mb-1 text-lg font-semibold text-primary">Prospective Case Log</h2>
         <p className="mb-4 text-xs text-muted-foreground">
-          Save COMPASS predictions per case. Enter pathology results when available. Data stored in browser localStorage.
+          Save COMPASS predictions per case. Enter pathology results when available. Data stored locally
+          in this browser.
         </p>
 
         <div className="mb-4 flex flex-wrap gap-2">
@@ -389,19 +389,30 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
           </div>
         ) : (
           <div className="space-y-3">
-            {cases.map((c, i) => (
+            {cases.map((c, i) => {
+              const isActive = c.id === activeId;
+              return (
               <div
                 key={c.id}
                 className={cn(
                   "rounded-lg border bg-card p-3",
-                  c.path_ece !== null ? "border-emerald-500/40" : "border-border/70",
+                  isActive
+                    ? "border-primary ring-1 ring-primary/30"
+                    : c.path_ece !== null
+                      ? "border-emerald-500/40"
+                      : "border-border/70",
                 )}
               >
                 {/* Header */}
                 <div className="mb-2 flex items-start justify-between">
-                  <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {isActive && (
+                      <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[9px] font-bold uppercase text-primary tracking-wide">
+                        Current
+                      </span>
+                    )}
                     <span className="font-semibold text-primary text-sm">{c.date}</span>
-                    <span className="ml-2 text-[11px] text-muted-foreground">
+                    <span className="text-[11px] text-muted-foreground">
                       GG{c.gg} | PSA {c.psa} | PIRADS {c.pirads} | {c.laterality}
                     </span>
                   </div>
@@ -444,7 +455,7 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
                     { l: "LNI", v: c.pred_lni, p: c.path_lni },
                   ].map((pr) => {
                     const match =
-                      pr.p !== null && pr.p !== undefined
+                      pr.p !== null && pr.p !== undefined && pr.v !== null
                         ? (pr.v >= 50 ? 1 : 0) === pr.p
                           ? " ✔"
                           : " ✘"
@@ -455,7 +466,7 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
                         className="rounded border border-border/60 bg-muted/30 px-2 py-0.5 text-[10px]"
                       >
                         <span className="text-muted-foreground">{pr.l} </span>
-                        <span className={cn("font-bold", riskCls(pr.v))}>{pr.v}%</span>
+                        <span className={cn("font-bold", pr.v !== null && riskCls(pr.v))}>{pr.v === null ? "—" : `${pr.v}%`}</span>
                         {match && (
                           <span className={match.includes("✔") ? "text-emerald-500" : "text-red-500"}>
                             {match}
@@ -505,7 +516,8 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
                   className="w-full rounded border border-border/60 bg-background px-2 py-1 text-[10px] text-foreground"
                 />
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

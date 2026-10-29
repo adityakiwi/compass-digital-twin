@@ -1,7 +1,11 @@
+import React from "react";
 import {
+  Activity,
   BookMarked,
   BookOpen,
+  ClipboardList,
   Info,
+  Layers,
   Moon,
   Printer,
   Redo2,
@@ -10,14 +14,24 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { usePatientStore } from "@/store/patientStore";
-import { useUiStore } from "@/store/uiStore";
+import { useUiStore, type DesktopTab } from "@/store/uiStore";
 import { printReport } from "@/lib/compass/printReport";
 import { cn } from "@/lib/utils";
 
+const DESKTOP_TABS: { id: DesktopTab; label: string; Icon: React.ElementType }[] = [
+  { id: "input",       label: "Input",       Icon: ClipboardList },
+  { id: "predictions", label: "Predictions", Icon: Activity },
+  { id: "outcomes",    label: "Outcomes",    Icon: Layers },
+];
+
 export function AppHeader() {
+
   const dark = useUiStore((s) => s.dark);
   const setDark = useUiStore((s) => s.setDark);
+  const desktopTab = useUiStore((s) => s.desktopTab);
+  const setDesktopTab = useUiStore((s) => s.setDesktopTab);
   const setInfoOpen = useUiStore((s) => s.setInfoOpen);
+  const setWelcomeOpen = useUiStore((s) => s.setWelcomeOpen);
   const setCaseLogOpen = useUiStore((s) => s.setCaseLogOpen);
   const setReferenceOpen = useUiStore((s) => s.setReferenceOpen);
   const patients = usePatientStore((s) => s.patients);
@@ -31,8 +45,13 @@ export function AppHeader() {
 
   return (
     <header className="z-40 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card/95 px-3 backdrop-blur-md sm:px-4 supports-[backdrop-filter]:bg-card/85">
-      {/* Brand */}
-      <div className="flex shrink-0 flex-col justify-center gap-0.5">
+      {/* Brand — click to reopen welcome screen */}
+      <button
+        type="button"
+        onClick={() => setWelcomeOpen(true)}
+        className="flex shrink-0 flex-col justify-center gap-0.5 rounded-md text-left transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        aria-label="Open welcome screen"
+      >
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-black tracking-tight text-foreground sm:text-base">
             COMPASS
@@ -47,7 +66,7 @@ export function AppHeader() {
           </span>
           <span className="text-[8px] text-muted-foreground/50">IRB: STUDY-14-00050</span>
         </div>
-      </div>
+      </button>
 
       {/* Divider */}
       <div className="hidden h-5 w-px shrink-0 bg-border/70 sm:block" />
@@ -81,8 +100,31 @@ export function AppHeader() {
         </select>
       </div>
 
+      {/* Desktop tab switcher */}
+      <div className="hidden lg:flex items-center gap-0.5 rounded-lg bg-muted/60 p-0.5 mx-auto">
+        {DESKTOP_TABS.map(({ id, label, Icon }) => {
+          const active = desktopTab === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setDesktopTab(id)}
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-all",
+                active
+                  ? "bg-card shadow-sm text-foreground ring-1 ring-black/[0.06] dark:ring-white/[0.08]"
+                  : "text-muted-foreground hover:bg-background/50",
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" aria-hidden />
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Right actions */}
-      <div className="ml-auto flex shrink-0 items-center gap-0.5">
+      <div className="ml-auto lg:ml-0 flex shrink-0 items-center gap-0.5">
         {/* Undo/Redo */}
         <div className="flex items-center">
           <Button
@@ -167,6 +209,7 @@ export function AppHeader() {
         >
           <Info className="h-[15px] w-[15px]" />
         </Button>
+
       </div>
 
       {active && (
@@ -174,6 +217,7 @@ export function AppHeader() {
           Active case: {active.name}
         </span>
       )}
+
     </header>
   );
 }
