@@ -1,10 +1,20 @@
+import { normalizePdi } from "@/lib/compass/planeDifficultyIndex";
+import { resolveImagingAvailability } from "@/lib/compass/imagingAvailability";
 import {
   defaultClinicalState,
   type ClinicalState,
+  type OptionalPredictor,
   type Prostate3DInputV1,
 } from "@/types/patient";
 
-function parsePsmaLn(staging: Prostate3DInputV1["staging"]): number {
+/**
+ * PSMA nodal status. Returns null when no PSMA nodal assessment is present in
+ * the record at all, so "no PSMA scan" stays distinct from "PSMA scan, nodes
+ * negative".
+ */
+function parsePsmaLn(
+  staging: Prostate3DInputV1["staging"],
+): OptionalPredictor {
   const lnPsma = staging.lymph_nodes_psma;
   if (Array.isArray(lnPsma)) {
     return lnPsma.some(
@@ -18,7 +28,8 @@ function parsePsmaLn(staging: Prostate3DInputV1["staging"]): number {
     return /positive|suspicious|avid|uptake/i.test(lnPsma) ? 1 : 0;
   }
   if (lnPsma === 1 || lnPsma === true) return 1;
-  return 0;
+  if (lnPsma === 0 || lnPsma === false) return 0;
+  return null;
 }
 
 /** Build clinical state from imported `prostate-3d-input-v1` (mirrors `loadPatientData`). */
@@ -32,8 +43,11 @@ export function clinicalStateFromRecord(
   S.vol = 45;
   S.psad = 0.144;
   S.gg = 1;
-  S.cores = 0;
-  S.maxcore = 0;
+  // Absent optional predictors stay null. Pre-Phase-1A these were seeded with
+  // plausible numbers (0 cores, 0% max core, PI-RADS 2, MRI negative), which
+  // made "not recorded" indistinguishable from "recorded as negative".
+  S.cores = null;
+  S.maxcore = null;
   S.linear_mm = 0;
   S.pct45 = 0;
   S.cribriform_bx = 0;
@@ -41,9 +55,9 @@ export function clinicalStateFromRecord(
   S.pni_bx = 0;
   S.bilateral = 0;
   S.laterality = "bilateral";
-  S.pirads = 2;
-  S.mri_epe = 0;
-  S.mri_svi = 0;
+  S.pirads = null;
+  S.mri_epe = null;
+  S.mri_svi = null;
   S.primus = 0;
   S.mus_ece = 0;
   S.mus_svi = 0;
@@ -61,8 +75,8 @@ export function clinicalStateFromRecord(
   S.linear_left = 0;
   S.linear_right = 0;
   S.mri_size = 0;
-  S.mri_abutment = -1;
-  S.mri_adc = 0;
+  S.mri_abutment = null;
+  S.mri_adc = null;
 
   const pat = P.patient;
   const bx = P.biopsy;
@@ -70,11 +84,20 @@ export function clinicalStateFromRecord(
   const st = P.staging;
 
   if (pat.age !== null && pat.age !== undefined) S.age = pat.age;
-  if (pat.psa !== null && pat.psa !== undefined) S.psa = pat.psa;
-  if (pr.volume_cc !== null && pr.volume_cc !== undefined) S.vol = pr.volume_cc;
+
+  // Required inputs. The historical defaults above (PSA 6.5, volume 45, GG 1)
+  // are left in place so the v22 runtime is unchanged, but the omission is
+  // recorded so vNext can block execution instead of inventing a PSAD.
+  S.required_present = {
+    psa: pat.psa !== null && pat.psa !== undefined,
+    vol: pr.volume_cc !== null && pr.volume_cc !== undefined,
+    gg: bx.max_grade_group !== null && bx.max_grade_group !== undefined,
+  };
+  if (S.required_present.psa) S.psa = pat.psa as number;
+  if (S.required_present.vol) S.vol = pr.volume_cc as number;
   S.psad = S.psa / S.vol;
-  if (bx.max_grade_group !== null && bx.max_grade_group !== undefined)
-    S.gg = bx.max_grade_group;
+  if (S.required_present.gg) S.gg = bx.max_grade_group as number;
+
   if (bx.total_positive_cores !== null && bx.total_positive_cores !== undefined)
     S.cores = bx.total_positive_cores;
   if (
@@ -94,8 +117,9 @@ export function clinicalStateFromRecord(
   if (bx.has_idc !== null && bx.has_idc !== undefined) S.idc_bx = bx.has_idc;
   if (bx.has_pni !== null && bx.has_pni !== undefined) S.pni_bx = bx.has_pni;
   S.bilateral = bx.laterality === "bilateral" ? 1 : 0;
-  S.mri_epe = st.epe ? 1 : 0;
-  S.mri_svi = st.svi ? 1 : 0;
+  // null (MRI not performed / EPE-SVI not assessed) stays null.
+  S.mri_epe = st.epe === null || st.epe === undefined ? null : st.epe ? 1 : 0;
+  S.mri_svi = st.svi === null || st.svi === undefined ? null : st.svi ? 1 : 0;
   if (st.lesion_size_cm) S.mri_size = st.lesion_size_cm;
   if (st.abutment !== null && st.abutment !== undefined)
     S.mri_abutment = st.abutment;
@@ -111,6 +135,7 @@ export function clinicalStateFromRecord(
   if (pat.exercise) S.exercise = pat.exercise;
   if (pat.pfmt) S.pfmt = pat.pfmt;
   if (pat.alcohol) S.alcohol = pat.alcohol;
+  if (pat.diet) S.diet = pat.diet;
   if (pat.pde5_plan) S.pde5 = pat.pde5_plan;
   else if (pat.pde5 === true) S.pde5 = "daily";
   S.laterality = bx.laterality || "bilateral";
@@ -145,14 +170,18 @@ export function clinicalStateFromRecord(
     (S.laterality === "right" || S.laterality === "bilateral")
   )
     S.gg_right = S.gg;
-  if (!S.mc_left && S.gg_left > 0) S.mc_left = S.maxcore;
-  if (!S.mc_right && S.gg_right > 0) S.mc_right = S.maxcore;
+  if (!S.mc_left && S.gg_left > 0) S.mc_left = S.maxcore ?? 0;
+  if (!S.mc_right && S.gg_right > 0) S.mc_right = S.maxcore ?? 0;
   if (!S.linear_left && S.gg_left > 0) S.linear_left = S.linear_mm;
   if (!S.linear_right && S.gg_right > 0) S.linear_right = S.linear_mm;
 
-  let maxPirads = 2;
+  // PI-RADS is only "observed" if a lesion or the staging block actually
+  // carries one. Pre-Phase-1A this seeded 2, which is indistinguishable from a
+  // real PI-RADS 2 and also happens to be the model-layer floor.
+  let maxPirads: OptionalPredictor = null;
   for (const l of P.lesions || []) {
-    if (l.pirads && l.pirads > maxPirads) maxPirads = l.pirads;
+    if (l.pirads && (maxPirads === null || l.pirads > maxPirads))
+      maxPirads = l.pirads;
   }
   S.pirads = maxPirads;
 
@@ -177,7 +206,8 @@ export function clinicalStateFromRecord(
     S.suv = maxSuv;
   }
 
-  if (st.max_pirads && st.max_pirads > S.pirads) S.pirads = st.max_pirads;
+  if (st.max_pirads && (S.pirads === null || st.max_pirads > S.pirads))
+    S.pirads = st.max_pirads;
   if (st.max_suv && st.max_suv > S.suv) {
     S.suv = st.max_suv;
     S.psma_avail = 1;
@@ -203,6 +233,103 @@ export function clinicalStateFromRecord(
   }
 
   S.psma_ln = parsePsmaLn(st);
+
+  // A negative finding only counts if the study is known to have been done.
+  // Legacy records stored epe/svi as plain false even with no MRI, and seeded
+  // PI-RADS 2; under "unknown" those become null rather than observed negatives.
+  const avail = resolveImagingAvailability(P);
+  S.imaging_availability = avail.status;
+  S.imaging_conflicts = avail.conflicts;
+  if (avail.status.mri !== "performed") {
+    if (S.mri_epe === 0) S.mri_epe = null;
+    if (S.mri_svi === 0) S.mri_svi = null;
+    if (S.pirads === 2 && !(P.lesions || []).some((l) => l.source === "MRI"))
+      S.pirads = null;
+  }
+  if (avail.status.psma !== "performed" && S.psma_ln === 0) S.psma_ln = null;
+
+  if (pr.median_lobe_grade !== null && pr.median_lobe_grade !== undefined)
+    S.median_lobe_grade = pr.median_lobe_grade;
+
+  const h = P.history;
+  if (h) {
+    S.prior_turp = !!h.prior_turp;
+    S.prior_urolift = !!h.prior_urolift;
+    S.prior_greenlight = !!h.prior_greenlight;
+    S.prior_holep = !!h.prior_holep;
+    S.prior_rezum = !!h.prior_rezum;
+    S.prior_pelvic_radiation = !!h.prior_pelvic_radiation;
+    S.urinary_retention = !!h.urinary_retention;
+    S.recurrent_uti = !!h.recurrent_uti;
+    S.treated_prostatitis = !!h.treated_prostatitis;
+    S.biopsy_shows_inflammation = !!h.biopsy_shows_inflammation;
+    if (h.biopsy_sessions !== null && h.biopsy_sessions !== undefined)
+      S.biopsy_sessions = h.biopsy_sessions;
+    S.crohns = !!h.crohns;
+    S.ulcerative_colitis = !!h.ulcerative_colitis;
+    S.diverticulitis = !!h.diverticulitis;
+    S.pelvic_abscess = !!h.pelvic_abscess;
+    S.hernia_mesh = !!h.hernia_mesh;
+    S.rectal_fistula = !!h.rectal_fistula;
+    S.radiation_proctitis = !!h.radiation_proctitis;
+    if (h.asa_class !== null && h.asa_class !== undefined) S.asa_class = h.asa_class;
+    S.prior_abdominal_surgery = !!h.prior_abdominal_surgery;
+    S.anticoagulant = !!h.anticoagulant;
+    S.osa = !!h.osa;
+    if (h.mri_periprostatic_inflammation)
+      S.mri_periprostatic_inflammation = h.mri_periprostatic_inflammation;
+    S.mri_periprostatic_fat_stranding = !!h.mri_periprostatic_fat_stranding;
+    if (h.intraop_inflammation_l !== null && h.intraop_inflammation_l !== undefined)
+      S.intraop_inflammation_l = h.intraop_inflammation_l;
+    if (h.intraop_inflammation_r !== null && h.intraop_inflammation_r !== undefined)
+      S.intraop_inflammation_r = h.intraop_inflammation_r;
+    const num = (v: number | null | undefined, fallback: number) =>
+      v !== null && v !== undefined ? v : fallback;
+    S.mri_capsule_interface_l = num(h.mri_capsule_interface_l, S.mri_capsule_interface_l);
+    S.mri_capsule_interface_r = num(h.mri_capsule_interface_r, S.mri_capsule_interface_r);
+    S.mri_nvb_plane_l = num(h.mri_nvb_plane_l, S.mri_nvb_plane_l);
+    S.mri_nvb_plane_r = num(h.mri_nvb_plane_r, S.mri_nvb_plane_r);
+    S.mri_post_treatment_distortion_l = num(h.mri_post_treatment_distortion_l, S.mri_post_treatment_distortion_l);
+    S.mri_post_treatment_distortion_r = num(h.mri_post_treatment_distortion_r, S.mri_post_treatment_distortion_r);
+    S.mri_nonmass_inflammatory_signal_l = num(h.mri_nonmass_inflammatory_signal_l, S.mri_nonmass_inflammatory_signal_l);
+    S.mri_nonmass_inflammatory_signal_r = num(h.mri_nonmass_inflammatory_signal_r, S.mri_nonmass_inflammatory_signal_r);
+    S.mri_fat_stranding_l = num(h.mri_fat_stranding_l, S.mri_fat_stranding_l);
+    S.mri_fat_stranding_r = num(h.mri_fat_stranding_r, S.mri_fat_stranding_r);
+    S.prior_focal_ablation_l = num(h.prior_focal_ablation_l, S.prior_focal_ablation_l);
+    S.prior_focal_ablation_r = num(h.prior_focal_ablation_r, S.prior_focal_ablation_r);
+    if (h.prior_pelvic_surgery) S.prior_pelvic_surgery = h.prior_pelvic_surgery;
+    if (h.penile_prosthesis_reservoir) S.penile_prosthesis_reservoir = h.penile_prosthesis_reservoir;
+    S.catheter_prolonged_or_traumatic = !!h.catheter_prolonged_or_traumatic;
+    S.biopsy_recent_or_complicated = !!h.biopsy_recent_or_complicated;
+    S.mri_post_biopsy_hemorrhage = !!h.mri_post_biopsy_hemorrhage;
+    S.radiation_brachytherapy = !!h.radiation_brachytherapy;
+    S.bph_procedure_complicated = !!h.bph_procedure_complicated;
+    S.five_ari_long_term = !!h.five_ari_long_term;
+    S.mri_denonvilliers = num(h.mri_denonvilliers, S.mri_denonvilliers);
+    S.plane_difficulty_l = normalizePdi(h.plane_difficulty_l);
+    S.plane_difficulty_r = normalizePdi(h.plane_difficulty_r);
+    if (h.pelvic_visceral_fat_cm3 !== null && h.pelvic_visceral_fat_cm3 !== undefined)
+      S.pelvic_visceral_fat_cm3 = h.pelvic_visceral_fat_cm3;
+    S.neoadjuvant_adt = !!h.neoadjuvant_adt;
+    if (h.crp !== null && h.crp !== undefined) S.crp = h.crp;
+    if (h.nlr !== null && h.nlr !== undefined) S.nlr = h.nlr;
+    S.flag_active_infection = !!h.flag_active_infection;
+    S.flag_imaging_discordant = !!h.flag_imaging_discordant;
+    S.flag_mri_artifact = !!h.flag_mri_artifact;
+    S.flag_key_data_missing = !!h.flag_key_data_missing;
+  }
+
+  const pl = P.plan;
+  if (pl) {
+    const tri = (v: boolean | null | undefined): boolean | null =>
+      v === undefined ? null : v;
+    S.plan_ns_override_l = pl.ns_override_l ?? null;
+    S.plan_ns_override_r = pl.ns_override_r ?? null;
+    S.plan_sv_preservation_l = tri(pl.sv_preservation_l);
+    S.plan_sv_preservation_r = tri(pl.sv_preservation_r);
+    S.plan_hydrodissection_l = tri(pl.hydrodissection_l);
+    S.plan_hydrodissection_r = tri(pl.hydrodissection_r);
+  }
 
   return S;
 }

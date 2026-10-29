@@ -1,16 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, CloudUpload, CloudDownload } from "lucide-react";
+import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { usePatientStore, savePatientToLibrary, loadPatientFromLibrary, hydratePatientsFromCaseLog } from "@/store/patientStore";
+import { usePatientStore, savePatientToLibrary, loadPatientFromLibrary } from "@/store/patientStore";
 import { clinicalStateFromRecord } from "@/lib/compass/clinicalFromRecord";
 import { deriveClinicalFromLesions, lesionsFromRows } from "@/lib/utils/normalization";
 import { cn } from "@/lib/utils";
-import { pushCases, pullCases } from "@/lib/turso";
 
 const CASE_LOG_KEY = "compass_cases";
-const TURSO_ENABLED = !!(
-  import.meta.env.VITE_TURSO_URL && import.meta.env.VITE_TURSO_AUTH_TOKEN
-);
 
 export interface CaseRecord {
   id: string;
@@ -20,22 +16,22 @@ export interface CaseRecord {
   vol: number;
   psad: string;
   gg: number;
-  cores: number;
-  maxcore: number;
+  cores: number | null;
+  maxcore: number | null;
   linear: number;
-  pirads: number;
+  pirads: number | null;
   laterality: string;
   gg_left: number;
   gg_right: number;
-  mri_epe: number;
-  mri_svi: number;
+  mri_epe: number | null;
+  mri_svi: number | null;
   mri_size: number;
-  mri_abutment: number;
-  mri_adc: number;
+  mri_abutment: number | null;
+  mri_adc: number | null;
   mus_ece: number;
   mus_svi: number;
   suv: number;
-  psma_ln: number;
+  psma_ln: number | null;
   psma_lesions: number;
   psma_base: number;
   psma_svi: number;
@@ -43,13 +39,13 @@ export interface CaseRecord {
   ev_base: number;
   lesion_count: number;
   // predictions
-  pred_ece: number;
-  pred_ece_l: number;
-  pred_ece_r: number;
+  pred_ece: number | null;
+  pred_ece_l: number | null;
+  pred_ece_r: number | null;
   pred_svi: number;
-  pred_upgrade: number;
-  pred_psm: number;
-  pred_bcr: number;
+  pred_upgrade: number | null;
+  pred_psm: number | null;
+  pred_bcr: number | null;
   pred_lni: number;
   ns_left: number;
   ns_right: number;
@@ -129,51 +125,7 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
   const setPatientName = usePatientStore((s) => s.setPatientName);
 
   const [cases, setCases] = useState<CaseRecord[]>([]);
-  const [syncStatus, setSyncStatus] = useState<string>("");
-  const [syncing, setSyncing] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
-
-  const handlePush = async () => {
-    setSyncing(true);
-    setSyncStatus("Pushing…");
-    try {
-      const all = getCases();
-      const n = await pushCases(all);
-      setSyncStatus(`Pushed ${n} case${n !== 1 ? "s" : ""} ✓`);
-    } catch (err) {
-      setSyncStatus(`Push failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const handlePull = async () => {
-    setSyncing(true);
-    setSyncStatus("Pulling…");
-    try {
-      const local = getCases();
-      const pulled = await pullCases(local);
-      // Merge: cloud is authoritative for clinical/prediction/path fields;
-      // local notes are preserved inside pullCases(). New cloud-only cases are added.
-      const localIds = new Set(local.map((c) => c.id));
-      const newFromCloud = pulled.filter((c) => !localIds.has(c.id));
-      // Update existing local records' path fields from cloud
-      const updated = local.map((lc) => {
-        const remote = pulled.find((rc) => rc.id === lc.id);
-        return remote ? { ...remote, notes: lc.notes } : lc;
-      });
-      const merged = [...newFromCloud, ...updated];
-      saveCases(merged);
-      setCases(merged);
-      // Add newly pulled cases to the patient store so they can be loaded.
-      hydratePatientsFromCaseLog();
-      setSyncStatus(`Pulled ${pulled.length} case${pulled.length !== 1 ? "s" : ""} ✓`);
-    } catch (err) {
-      setSyncStatus(`Pull failed: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -251,13 +203,13 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
       ev_lesions: S.ev_n_lesions,
       ev_base: S.ev_at_base,
       lesion_count: entry.lesionRows.length,
-      pred_ece: Math.round(predictions.ece * 100),
-      pred_ece_l: Math.round(predictions.eceL * 100),
-      pred_ece_r: Math.round(predictions.eceR * 100),
+      pred_ece: Number.isFinite(predictions.ece) ? Math.round(predictions.ece * 100) : null,
+      pred_ece_l: Number.isFinite(predictions.eceL) ? Math.round(predictions.eceL * 100) : null,
+      pred_ece_r: Number.isFinite(predictions.eceR) ? Math.round(predictions.eceR * 100) : null,
       pred_svi: Math.round(predictions.svi * 100),
-      pred_upgrade: Math.round(predictions.upgrade * 100),
-      pred_psm: Math.round(predictions.psm * 100),
-      pred_bcr: Math.round(predictions.bcr * 100),
+      pred_upgrade: Number.isFinite(predictions.upgrade) ? Math.round(predictions.upgrade * 100) : null,
+      pred_psm: Number.isFinite(predictions.psmL) && Number.isFinite(predictions.psmR) ? Math.round(Math.max(predictions.psmL, predictions.psmR) * 100) : null,
+      pred_bcr: Number.isFinite(predictions.bcr36) ? Math.round(predictions.bcr36 * 100) : null,
       pred_lni: Math.round(predictions.lni * 100),
       ns_left: predictions.nsL,
       ns_right: predictions.nsR,
@@ -354,9 +306,9 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
   const total = cases.length;
   const withPath = cases.filter((c) => c.path_ece !== null).length;
   const eceAccuracy = (() => {
-    const evaled = cases.filter((c) => c.path_ece !== null);
+    const evaled = cases.filter((c) => c.path_ece !== null && c.pred_ece !== null);
     if (evaled.length === 0) return null;
-    const correct = evaled.filter((c) => (c.pred_ece >= 50 ? 1 : 0) === c.path_ece).length;
+    const correct = evaled.filter((c) => ((c.pred_ece ?? 0) >= 50 ? 1 : 0) === c.path_ece).length;
     return Math.round((correct / evaled.length) * 100);
   })();
 
@@ -391,8 +343,8 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
       <div className="mx-auto max-w-4xl">
         <h2 className="mb-1 text-lg font-semibold text-primary">Prospective Case Log</h2>
         <p className="mb-4 text-xs text-muted-foreground">
-          Save COMPASS predictions per case. Enter pathology results when available. Data stored locally;
-          cloud sync de-identifies records (ID hashed, notes never uploaded).
+          Save COMPASS predictions per case. Enter pathology results when available. Data stored locally
+          in this browser.
         </p>
 
         <div className="mb-4 flex flex-wrap gap-2">
@@ -406,43 +358,10 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
           <Button size="sm" variant="outline" onClick={exportCSV}>
             Export CSV
           </Button>
-          {TURSO_ENABLED && (
-            <>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1 text-sky-500 border-sky-500/40 hover:bg-sky-500/10"
-                onClick={handlePush}
-                disabled={syncing}
-              >
-                <CloudUpload className="h-3.5 w-3.5" />
-                Push
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1 text-indigo-500 border-indigo-500/40 hover:bg-indigo-500/10"
-                onClick={handlePull}
-                disabled={syncing}
-              >
-                <CloudDownload className="h-3.5 w-3.5" />
-                Pull
-              </Button>
-            </>
-          )}
           <Button size="sm" variant="outline" className="text-red-500 border-red-500/40 hover:bg-red-500/10" onClick={clearAll}>
             Clear All
           </Button>
         </div>
-
-        {TURSO_ENABLED && syncStatus && (
-          <p className="mb-3 text-[11px] text-muted-foreground">{syncStatus}</p>
-        )}
-        {!TURSO_ENABLED && (
-          <p className="mb-3 rounded border border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-[10px] text-amber-500">
-            Cloud sync disabled — set VITE_TURSO_URL and VITE_TURSO_AUTH_TOKEN to enable.
-          </p>
-        )}
 
         {/* Stats row */}
         <div className="mb-4 flex flex-wrap gap-3">
@@ -536,7 +455,7 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
                     { l: "LNI", v: c.pred_lni, p: c.path_lni },
                   ].map((pr) => {
                     const match =
-                      pr.p !== null && pr.p !== undefined
+                      pr.p !== null && pr.p !== undefined && pr.v !== null
                         ? (pr.v >= 50 ? 1 : 0) === pr.p
                           ? " ✔"
                           : " ✘"
@@ -547,7 +466,7 @@ export function CaseLog({ onClose }: { onClose: () => void }) {
                         className="rounded border border-border/60 bg-muted/30 px-2 py-0.5 text-[10px]"
                       >
                         <span className="text-muted-foreground">{pr.l} </span>
-                        <span className={cn("font-bold", riskCls(pr.v))}>{pr.v}%</span>
+                        <span className={cn("font-bold", pr.v !== null && riskCls(pr.v))}>{pr.v === null ? "—" : `${pr.v}%`}</span>
                         {match && (
                           <span className={match.includes("✔") ? "text-emerald-500" : "text-red-500"}>
                             {match}

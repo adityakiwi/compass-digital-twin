@@ -7,7 +7,6 @@ import { OutcomesWorkspace } from "@/components/OutcomesWorkspace";
 import { ThreeCanvas } from "@/components/ThreeCanvas";
 import { ZoneLabelsOverlay } from "@/components/ZoneLabelsOverlay";
 import { CaseLog } from "@/components/CaseLog";
-import { ChatWidget } from "@/components/ChatWidget";
 import { InfoPanel } from "@/components/InfoPanel";
 import { ReferencePanel } from "@/components/ReferencePanel";
 import { PredictionPanel } from "@/components/PredictionPanel";
@@ -19,7 +18,6 @@ import {
   lesionsFromRows,
 } from "@/lib/utils/normalization";
 import { clinicalStateFromRecord } from "@/lib/compass/clinicalFromRecord";
-import patientsCatalog from "@/data/patients.json";
 import {
   hydrateFromLocalStorage,
   hydratePatientsFromCaseLog,
@@ -70,7 +68,6 @@ function DimOverlay() {
 }
 
 export default function App() {
-  const bootstrapFromJson = usePatientStore((s) => s.bootstrapFromJson);
   const infoOpen = useUiStore((s) => s.infoOpen);
   const setInfoOpen = useUiStore((s) => s.setInfoOpen);
   const caseLogOpen = useUiStore((s) => s.caseLogOpen);
@@ -91,13 +88,10 @@ export default function App() {
     hydrateFromLocalStorage();
     const st = usePatientStore.getState();
     if (st.patients.length === 0) {
-      bootstrapFromJson(
-        patientsCatalog.patients as {
-          id: string;
-          name: string;
-          record: import("@/types/patient").Prostate3DInputV1;
-        }[],
-      );
+      // Start from a blank case (no defaults that the vNext models would read
+      // as real negatives), not the v22 template in patients.json.
+      st.newCase();
+      usePatientStore.setState({ loading: false });
     } else {
       st.recompute();
       usePatientStore.setState({ loading: false });
@@ -105,7 +99,7 @@ export default function App() {
     // Load saved library entries (full records) then fall back to case log snapshots.
     hydratePatientLibrary();
     hydratePatientsFromCaseLog();
-  }, [bootstrapFromJson]);
+  }, []);
 
   const onPredictions = desktopTab === "predictions";
 
@@ -181,7 +175,6 @@ export default function App() {
 
       <MobileTabBar />
 
-      <ChatWidget />
 
       {infoOpen && (
         <InfoPanel onClose={() => setInfoOpen(false)} />

@@ -1,27 +1,21 @@
 import type { ClinicalState } from "@/types/patient";
+// COMPAT SHIM (Phase 1A): see inputContract.ts. Each v22Absent() call passes
+// the exact in-band value the field held when absent pre-Phase-1A, so model
+// outputs are bit-identical. Phases 2–7 replace these with vNext imputation.
+import { v22Absent } from "./inputContract";
 import { logPsad, normalizeMaxCorePct, sigmoid } from "@/lib/utils/math";
 import {
   imagingFlagsForSide,
   type CollectedLesion,
 } from "@/lib/utils/normalization";
+import {
+  SVI_PATIENT as SVI_PATIENT_W,
+  SVI_SIDE as SVI_SIDE_W,
+  weightsToArrays,
+} from "./weights";
 
-/** Side-specific SVI — locked 2026-05-03 */
-const SVI_SIDE = {
-  i: -3.024,
-  c: [
-    // log_psad, gg(continuous proxy), mc_side, cores_side, linear_side,
-    // bilateral, pirads_side, mri_epe_side, mri_svi_side, mus_ece_side
-    0.3139, 0.35, 0.3156, 0.0324, 0.04, 0.1443, 0.2892, 0.0614, 0.4573, 0.0924,
-  ],
-  m: [
-    -1.634, 2.2902, 48.1988, 1.4226, 8.002, 0.2619, 2.9368, 0.0439, 0.0119,
-    0.0476,
-  ],
-  s: [
-    0.6788, 1.83, 33.8968, 1.8528, 12.0413, 0.4397, 1.0154, 0.2049, 0.1085,
-    0.213,
-  ],
-} as const;
+const SVI_SIDE          = weightsToArrays(SVI_SIDE_W);
+const SVI_PATIENT_W_ARRAYS = weightsToArrays(SVI_PATIENT_W);
 
 function linearPredict(
   intercept: number,
@@ -42,17 +36,6 @@ function linearPredict(
 }
 
 /**
- * MUS ECE logit delta for patient-level SVI.
- * mus_ece is absent from the trained SVI patient model feature set.
- * Coefficient ESTIMATED from the side-specific SVI model analogy;
- * NOT formally calibrated from training data.
- */
-function musEceSviDelta(S: ClinicalState): number {
-  if (S.mus_ece === 1) return 0.25;
-  return 0;
-}
-
-/**
  * Patient-level SVI — locked 2026-05-03, 22-feature binary-GG model.
  * Features: log_psad, gg2, gg3, gg4_5, mc, pirads, mri_epe, mri_svi,
  *           mus_ece, psma_epe, dec_imp, dec_avail, pos_cores
@@ -69,32 +52,18 @@ export function predictSviPatient(S: ClinicalState): number {
     gg2,
     gg3,
     gg45,
-    normalizeMaxCorePct(S.maxcore),
-    Math.max(S.pirads, 2),
-    S.mri_epe,
-    S.mri_svi,
+    normalizeMaxCorePct(v22Absent(S.maxcore, 0)),
+    Math.max(v22Absent(S.pirads, 2), 2),
+    v22Absent(S.mri_epe, 0),
+    v22Absent(S.mri_svi, 0),
     S.mus_ece,
     S.psma_epe,
     dec_imp,
     dec_avail,
-    S.cores,
+    v22Absent(S.cores, 0),
   ];
-  // Standardized betas — locked 2026-05-03
-  const c = [
-    0.3139, 0.7981, 0.7700, 0.9954, 0.3156, 0.2892, 0.0614, 0.4573,
-    0.0924, 0.0492, 0.2707, 0.3033, 0.0324,
-  ];
-  // Means from ECE/PSM cohort (N=3,454 — identical dataset)
-  const m = [
-    -1.6174, 0.397, 0.2603, 0.2389, 51.1131, 4.0824, 0.1499, 0.0428,
-    0.1071, 0.0264, 0.6446, 0.2372, 6.1908,
-  ];
-  // Standard deviations
-  const s = [
-    0.7068, 0.4893, 0.4388, 0.4264, 32.2602, 0.8493, 0.357, 0.2025,
-    0.3092, 0.1602, 0.1175, 0.4254, 4.2325,
-  ];
-  return sigmoid(linearPredict(-3.189665, c, m, s, vals));
+  const { i, c, m, s } = SVI_PATIENT_W_ARRAYS;
+  return sigmoid(linearPredict(i, c, m, s, vals));
 }
 
 export function predictSviSide(
@@ -116,18 +85,18 @@ export function predictSviSide(
     side === "left"
       ? S.cores_left !== undefined && S.cores_left !== null
         ? S.cores_left
-        : Math.round(S.cores / 2)
+        : Math.round(v22Absent(S.cores, 0) / 2)
       : S.cores_right !== undefined && S.cores_right !== null
         ? S.cores_right
-        : Math.round(S.cores / 2);
+        : Math.round(v22Absent(S.cores, 0) / 2);
   let mc_side =
     side === "left"
       ? S.mc_left !== undefined && S.mc_left !== null
         ? S.mc_left
-        : S.maxcore
+        : v22Absent(S.maxcore, 0)
       : S.mc_right !== undefined && S.mc_right !== null
         ? S.mc_right
-        : S.maxcore;
+        : v22Absent(S.maxcore, 0);
   mc_side = normalizeMaxCorePct(mc_side);
   const linear_side =
     side === "left"
@@ -147,9 +116,10 @@ export function predictSviSide(
     if (l.source === "MUS") musOnSide = true;
   }
 
+  const piradsRaw = v22Absent(S.pirads, 2);
   const pirads_side = mriOnSide
-    ? Math.max(S.pirads, 2)
-    : Math.max(S.pirads - 2, 2);
+    ? Math.max(piradsRaw, 2)
+    : Math.max(piradsRaw - 2, 2);
   const mri_epe_side = mriOnSide ? (S.mri_epe || 0) : 0;
   const mri_svi_side = mriOnSide ? (S.mri_svi || 0) : 0;
   const mus_ece_side = musOnSide ? (S.mus_ece || 0) : 0;

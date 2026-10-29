@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import {
   Activity,
   BookMarked,
@@ -6,7 +6,6 @@ import {
   ClipboardList,
   Info,
   Layers,
-  MessageCircle,
   Moon,
   Printer,
   Redo2,
@@ -18,8 +17,6 @@ import { usePatientStore } from "@/store/patientStore";
 import { useUiStore, type DesktopTab } from "@/store/uiStore";
 import { printReport } from "@/lib/compass/printReport";
 import { cn } from "@/lib/utils";
-import { useApiStatus } from "@/hooks/useApiStatus";
-import { AiSettingsModal } from "@/components/AiSettingsModal";
 
 const DESKTOP_TABS: { id: DesktopTab; label: string; Icon: React.ElementType }[] = [
   { id: "input",       label: "Input",       Icon: ClipboardList },
@@ -28,10 +25,6 @@ const DESKTOP_TABS: { id: DesktopTab; label: string; Icon: React.ElementType }[]
 ];
 
 export function AppHeader() {
-  const { status: aiStatus, recheck: recheckAi } = useApiStatus();
-  const chatOpen = useUiStore((s) => s.chatOpen);
-  const setChatOpen = useUiStore((s) => s.setChatOpen);
-  const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
   const dark = useUiStore((s) => s.dark);
   const setDark = useUiStore((s) => s.setDark);
@@ -217,38 +210,6 @@ export function AppHeader() {
           <Info className="h-[15px] w-[15px]" />
         </Button>
 
-        {/* AI status indicator — click to open settings */}
-        <button
-          type="button"
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-          aria-label="AI settings"
-          onClick={() => setAiSettingsOpen(true)}
-          title="AI settings"
-        >
-          <span
-            className={cn(
-              "h-2 w-2 shrink-0 rounded-full",
-              aiStatus === "connected"    && "bg-emerald-400 shadow-[0_0_6px_1px_rgba(52,211,153,0.6)]",
-              aiStatus === "disconnected" && "bg-red-500 shadow-[0_0_6px_1px_rgba(239,68,68,0.5)]",
-              aiStatus === "checking"     && "animate-pulse bg-yellow-400",
-            )}
-          />
-          <span className="hidden text-[10px] font-medium sm:inline">AI</span>
-        </button>
-
-        {/* Chat assistant */}
-        <button
-          type="button"
-          className={cn(
-            "flex items-center rounded-md px-1.5 py-1 transition-colors hover:bg-muted/60 hover:text-foreground",
-            chatOpen ? "text-primary" : "text-muted-foreground",
-          )}
-          aria-label="Open chat assistant"
-          onClick={() => setChatOpen(!chatOpen)}
-          title="Ask the assistant"
-        >
-          <MessageCircle className="h-[15px] w-[15px]" />
-        </button>
       </div>
 
       {active && (
@@ -257,13 +218,6 @@ export function AppHeader() {
         </span>
       )}
 
-      {aiSettingsOpen && (
-        <AiSettingsModal
-          status={aiStatus}
-          onRecheck={recheckAi}
-          onClose={() => setAiSettingsOpen(false)}
-        />
-      )}
     </header>
   );
 }

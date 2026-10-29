@@ -1,8 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { predictEcePatient, clampEcePatient } from "@/lib/models/ece";
-import { predictSviPatient } from "@/lib/models/svi";
-import { predictLni } from "@/lib/models/lni";
-import { predictBcrPreop } from "@/lib/models/bcr";
+import { MissingInputsNotice } from "@/components/MissingInputsNotice";
 import {
   Card,
   CardContent,
@@ -44,6 +41,10 @@ const STATION_FP: Record<string, { fp: number; note: string }> = {
   "inguinal": { fp: 70, note: "Often reactive." },
   "retroperitoneal": { fp: 50, note: "Moderate concern. Check SUVmax." },
 };
+
+function pctOrDash(v: number) {
+  return Number.isFinite(v) ? `${Math.round(v * 100)}%` : "—";
+}
 
 function riskCls(v: number) {
   if (v < 0.15) return "text-emerald-500";
@@ -91,10 +92,16 @@ function NsGradeTag({ grade }: { grade: number }) {
 
 export function PredictionPanel() {
   const predictions = usePatientStore((s) => s.predictions);
+  const missingRequired = usePatientStore((s) => s.missingRequired);
+  const computeEntryPredictions = usePatientStore((s) => s.computeEntryPredictions);
   const patients = usePatientStore((s) => s.patients);
   const activeId = usePatientStore((s) => s.activeId);
   const entry = patients.find((p) => p.id === activeId);
   const setExplainKey = useUiStore((s) => s.setExplainKey);
+
+  if (!predictions && entry && missingRequired.length > 0) {
+    return <MissingInputsNotice />;
+  }
 
   if (!predictions || !entry) {
     return (
@@ -125,10 +132,11 @@ export function PredictionPanel() {
     { k: "ECE",     v: predictions.ece,     neutral: false },
     { k: "SVI",     v: predictions.svi,     neutral: sviNeutral },
     { k: "Upgrade", v: predictions.upgrade, neutral: false },
-    { k: "PSM",     v: predictions.psm,     neutral: false },
-    { k: "BCR",     v: predictions.bcr,     neutral: false },
+    { k: "PSM",     v: Math.max(predictions.psmL, predictions.psmR), neutral: false,
+      sub: `L ${pctOrDash(predictions.psmL)} · R ${pctOrDash(predictions.psmR)}` },
+    { k: "BCR",     v: predictions.bcr36,   neutral: false, sub: "36-month" },
     { k: "LNI",     v: predictions.lni,     neutral: false },
-  ] as const;
+  ] as { k: string; v: number; neutral: boolean; sub?: string }[];
 
   // NS zone detail
   const L = predictions.nsDetailL ?? { nsGrade: predictions.nsL, zones: {}, alerts: [], has_zone_data: false };
@@ -208,11 +216,15 @@ export function PredictionPanel() {
                     <div className="rounded-xl border border-border/70 bg-card px-2 py-2 text-center shadow-sm transition-shadow hover:shadow-md cursor-default sm:px-3 sm:py-3">
                       <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground sm:text-xs">{p.k}</div>
                       <div className={cn("text-xl font-bold tabular-nums sm:text-2xl lg:text-3xl", p.neutral ? "text-muted-foreground/50" : riskCls(p.v))}>
-                        {Math.round(p.v * 100)}%
+                        {pctOrDash(p.v)}
                       </div>
                       {p.neutral
                         ? <div className="text-[10px] leading-tight text-muted-foreground/40 sm:text-xs">low</div>
-                        : <div className="text-[10px] leading-tight text-muted-foreground/35 sm:text-xs">{Math.round(ci.lo * 100)}–{Math.round(ci.hi * 100)}%</div>
+                        : p.sub
+                        ? <div className="text-[10px] leading-tight text-muted-foreground/60 sm:text-xs">{p.sub}</div>
+                        : Number.isFinite(p.v)
+                        ? <div className="text-[10px] leading-tight text-muted-foreground/35 sm:text-xs">{Math.round(ci.lo * 100)}–{Math.round(ci.hi * 100)}%</div>
+                        : null
                       }
                     </div>
                   </TooltipTrigger>
@@ -241,8 +253,8 @@ export function PredictionPanel() {
                 <tbody>
                   <tr className="border-b border-border/60">
                     <td className="py-1.5 font-medium">Side ECE</td>
-                    <td className={cn("py-1.5 px-2", riskCls(predictions.eceL))}>{Math.round(predictions.eceL * 100)}%</td>
-                    <td className={cn("py-1.5 px-2", riskCls(predictions.eceR))}>{Math.round(predictions.eceR * 100)}%</td>
+                    <td className={cn("py-1.5 px-2", riskCls(predictions.eceL))}>{pctOrDash(predictions.eceL)}</td>
+                    <td className={cn("py-1.5 px-2", riskCls(predictions.eceR))}>{pctOrDash(predictions.eceR)}</td>
                   </tr>
                   {predictions.ece >= 0.05 && (
                     <tr className="border-b border-border/60 text-muted-foreground">
@@ -250,7 +262,7 @@ export function PredictionPanel() {
                       <td colSpan={2} className="px-2 py-1.5">
                         <span className="text-emerald-500">{Math.round((1 - predictions.extensive) * 100)}% focal</span>
                         {" · "}
-                        <span className={predictions.extensive >= 0.5 ? "text-red-500" : "text-amber-500"}>{Math.round(predictions.extensive * 100)}% extensive</span>
+                        <span className={predictions.extensive >= 0.5 ? "text-red-500" : "text-amber-500"}>{pctOrDash(predictions.extensive)} extensive</span>
                       </td>
                     </tr>
                   )}
@@ -381,13 +393,8 @@ export function PredictionPanel() {
                   <tbody>
                     {patients.map((pat) => {
                       const isActive = pat.id === activeId;
-                      const rec = { ...pat.record, lesions: pat.lesionRows };
-                      const S0 = clinicalStateFromRecord(rec);
-                      const S = deriveClinicalFromLesions(S0, lesionsFromRows(pat.lesionRows));
-                      const ece = clampEcePatient(predictEcePatient(S));
-                      const svi = predictSviPatient(S);
-                      const lni = predictLni(S);
-                      const bcr = predictBcrPreop(S);
+                      const { predictions: pp } = computeEntryPredictions(pat);
+                      const { ece, svi, lni, bcr36: bcr } = pp;
                       return (
                         <tr
                           key={pat.id}
@@ -402,16 +409,16 @@ export function PredictionPanel() {
                             </span>
                           </td>
                           <td className={cn("px-1 py-1.5 text-center font-bold tabular-nums", riskCls(ece))}>
-                            {Math.round(ece * 100)}%
+                            {pctOrDash(ece)}
                           </td>
                           <td className={cn("px-1 py-1.5 text-center font-bold tabular-nums", svi < 0.1 ? "text-muted-foreground/40" : riskCls(svi))}>
-                            {Math.round(svi * 100)}%
+                            {pctOrDash(svi)}
                           </td>
                           <td className={cn("px-1 py-1.5 text-center font-bold tabular-nums", riskCls(lni))}>
-                            {Math.round(lni * 100)}%
+                            {pctOrDash(lni)}
                           </td>
                           <td className={cn("px-1 py-1.5 pr-2 text-center font-bold tabular-nums", riskCls(bcr))}>
-                            {Math.round(bcr * 100)}%
+                            {pctOrDash(bcr)}
                           </td>
                         </tr>
                       );
