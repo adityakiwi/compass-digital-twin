@@ -49,17 +49,17 @@ export function printReport() {
   }
 
   // ── Predictions ──
-  let predHtml = `<table><tr><th>ECE</th><th>SVI</th><th>Upgrade</th><th>PSM</th><th>BCR</th><th>LNI</th></tr><tr>`;
-  const predItems = [
+  let predHtml = `<table><tr><th>ECE</th><th>SVI</th><th>Upgrade</th><th>PSM (L / R)</th><th>BCR 36-mo</th><th>LNI</th></tr><tr>`;
+  const predItems: { v: number; txt?: string }[] = [
     { v: predictions.ece },
     { v: predictions.svi },
     { v: predictions.upgrade },
-    { v: predictions.psm },
-    { v: predictions.bcr },
+    { v: Math.max(predictions.psmL, predictions.psmR), txt: `${pct(predictions.psmL)} / ${pct(predictions.psmR)}` },
+    { v: predictions.bcr36 },
     { v: predictions.lni },
   ];
   predItems.forEach((p) => {
-    predHtml += `<td style="color:${rk(p.v)};font-weight:700;font-size:14px">${pct(p.v)}</td>`;
+    predHtml += `<td style="color:${rk(p.v)};font-weight:700;font-size:14px">${p.txt ?? pct(p.v)}</td>`;
   });
   predHtml += `</tr></table>`;
 

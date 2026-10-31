@@ -793,8 +793,7 @@ function PsmTab() {
               ["PI-RADS of the MRI index lesion, by side", "Index lesion side gets its PI-RADS, the other side gets 0, a bilateral index lesion gives both sides the score. Unknown side or score is missing, never guessed"],
             ].map(([f, d]) => (
               <tr key={f} className="border-b border-border/40">
-                <Td className="text-foreground">{f}</Td>
-                <Td className={`tabular-nums font-mono ${b.startsWith("−") ? "text-amber-400" : ""}`}>{b}</Td>
+                <Td className="text-foreground">{f}</Td><Td>{d}</Td>
               </tr>
             ))}
           </tbody>
@@ -1033,7 +1032,7 @@ function ScoreTab() {
                 <Td className="text-foreground">{out}</Td>
                 <Td className="tabular-nums">{compass}</Td>
                 <Td className="tabular-nums">{capra}</Td>
-                <Td className={`tabular-nums font-semibold ${delta.startsWith("+") ? "text-emerald-500" : "text-amber-400"}`}>{delta}</Td>
+                <Td className={`tabular-nums font-semibold ${delta?.startsWith("+") ? "text-emerald-500" : "text-amber-400"}`}>{delta}</Td>
                 <Td className="tabular-nums">{p}</Td>
               </tr>
             ))}

@@ -51,6 +51,7 @@ function linearPredict(
  * Coefficient ESTIMATED from the side-specific SVI model analogy;
  * NOT formally calibrated from training data.
  */
+// @ts-expect-error unused in the May code; kept as written
 function musEceSviDelta(S: ClinicalState): number {
   if (S.mus_ece === 1) return 0.25;
   return 0;

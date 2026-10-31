@@ -1,4 +1,4 @@
-import { Activity, ClipboardList, Layers, MessageCircle } from "lucide-react";
+import { Activity, ClipboardList, Layers } from "lucide-react";
 import { useUiStore, type DesktopTab } from "@/store/uiStore";
 import { cn } from "@/lib/utils";
 
@@ -11,11 +11,6 @@ const TABS: { id: DesktopTab; label: string; Icon: typeof Activity }[] = [
 export function MobileTabBar() {
   const desktopTab = useUiStore((s) => s.desktopTab);
   const setDesktopTab = useUiStore((s) => s.setDesktopTab);
-  const chatOpen = useUiStore((s) => s.chatOpen);
-  const setChatOpen = useUiStore((s) => s.setChatOpen);
-
-  // Hide the tab bar when chat is open on mobile — chat takes full screen
-  if (chatOpen) return null;
 
   return (
     <nav
@@ -61,15 +56,6 @@ export function MobileTabBar() {
       </div>
       <div className="h-2 shrink-0" aria-hidden />
 
-      {/* Chat FAB — visible on mobile only */}
-      <button
-        type="button"
-        onClick={() => setChatOpen(true)}
-        className="absolute -top-14 right-3 flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg active:scale-95 transition-transform"
-        aria-label="Open chat assistant"
-      >
-        <MessageCircle className="h-5 w-5" />
-      </button>
     </nav>
   );
 }

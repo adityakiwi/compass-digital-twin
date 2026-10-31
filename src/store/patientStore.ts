@@ -9,6 +9,7 @@ import {
   deriveClinicalFromLesions,
   lesionsFromRows,
 } from "@/lib/utils/normalization";
+import { defaultClinicalState } from "@/types/patient";
 import type { Prostate3DInputV1, ZoneMap } from "@/types/patient";
 import type { LesionRow } from "@/types/lesion";
 import type { CompassPredictions, ThreeZoneRuntime } from "@/types/prediction";
@@ -80,6 +81,8 @@ interface PatientState {
    * cleared REQUIRED field writes null to the record instead of a silent
    * default; `clinicalStateFromRecord` then reports it via `required_present`.
    */
+  /** Add a blank case (no PSA, volume, grade group or findings) and select it. */
+  newCase: () => void;
   updateClinicalForm: (
     patch: Partial<
       Omit<import("@/types/patient").ClinicalState, "psa" | "vol" | "gg">
@@ -92,6 +95,8 @@ interface PatientState {
   redo: () => void;
   pushHistory: () => void;
   recompute: () => void;
+  /** Run the models on any case (not only the active one), for the multi-case comparison. */
+  computeEntryPredictions: (entry: PatientEntry) => { predictions: CompassPredictions };
 }
 
 /** A new case with nothing filled in: required inputs and all findings absent. */
@@ -240,6 +245,16 @@ export const usePatientStore = create<PatientState>()((set, get) => ({
       set({ patients, activeId });
       get().recompute();
       get().pushHistory();
+    },
+
+    computeEntryPredictions: (entry) => {
+      const record = clone(entry.record);
+      record.zones = mergeZones(record.zones);
+      record.lesions = entry.lesionRows;
+      const S = deriveClinicalFromLesions(clinicalStateFromRecord(record), lesionsFromRows(entry.lesionRows));
+      mapLesionsToZones(record.zones, entry.lesionRows, S);
+      const working: Prostate3DInputV1 = { ...record, zones: record.zones };
+      return { predictions: runCompassModels(S, working, entry.lesionRows, clone(createBaseThreeZones())) };
     },
 
     recompute: () => {

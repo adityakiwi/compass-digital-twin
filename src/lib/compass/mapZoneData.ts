@@ -12,6 +12,9 @@ export function mapZoneDataToThree(
   pred: CompassPredictions,
 ): void {
   const nsWorst = Math.max(pred.nsL, pred.nsR);
+  // Anterior and posterior apex (3a/5p, 6a/10p) share one 3D apex zone per
+  // side; keep the larger value so neither finding is hidden.
+  const filled = new Set<string>();
 
   for (const cz of Object.keys(COMPASS_TO_3D)) {
     const z3dId = COMPASS_TO_3D[cz];
@@ -53,9 +56,11 @@ export function mapZoneDataToThree(
       }
     }
 
-    z3d.cancer = cancer;
-    z3d.ece = ece;
-    z3d.svi = zoneData.svi || 0.01;
+    const seen = filled.has(z3d.id);
+    filled.add(z3d.id);
+    z3d.cancer = seen ? Math.max(z3d.cancer, cancer) : cancer;
+    z3d.ece = seen ? Math.max(z3d.ece, ece) : ece;
+    z3d.svi = seen ? Math.max(z3d.svi, zoneData.svi || 0.01) : zoneData.svi || 0.01;
 
     if (zoneData.hasData && z3d.cancer < 0.08) z3d.cancer = 0.08;
 

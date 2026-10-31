@@ -471,7 +471,11 @@ export function ZoneInputWizard() {
     const corePcts = zones
       .map((d) => d.corePct)
       .filter((v): v is number => v !== undefined);
+    // The vNext models require a recorded biopsy grade group; in this UI it
+    // only comes from the zone grid, so record the highest one entered.
+    const ggs = zones.map((d) => d.gg ?? 0).filter((g) => g > 0);
     updateClinicalForm({
+      ...(ggs.length > 0 ? { gg: Math.max(...ggs) } : {}),
       mri_epe: anyMri ? (zones.some((d) => d.mriEpe) ? 1 : 0) : null,
       mri_svi: anyMri ? (zones.some((d) => d.mriSvi) ? 1 : 0) : null,
       mus_ece: zones.some((d) => d.musEce) ? 1 : 0,
