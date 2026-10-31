@@ -17,6 +17,41 @@ import type { LesionRow } from "@/types/lesion";
 import type { CompassPredictions, ThreeZoneRuntime } from "@/types/prediction";
 import { emptyLesion } from "@/types/lesion";
 import { isDemoMode } from "@/lib/demoMode";
+import { runLegacy, type LegacyPredictions } from "@/legacy/run";
+import { predictInflammationRisk } from "@/lib/compass/inflammationRisk";
+import { buildSurgicalPlan } from "@/lib/compass/surgicalPlan";
+
+/**
+ * Which engine runs: "vnext" (October models, current 3D mapping) or "v22"
+ * (Daniel's original May 13 models and 3D mapping, in src/legacy). For side-by-side testing.
+ */
+export type ModelSet = "vnext" | "v22";
+const MODEL_SET_KEY = "compass-model-set";
+function readModelSet(): ModelSet {
+  try {
+    return localStorage.getItem(MODEL_SET_KEY) === "v22" ? "v22" : "vnext";
+  } catch {
+    return "vnext";
+  }
+}
+
+/**
+ * The v22 run in the shape the rest of the UI reads. v22 has one PSM and one
+ * BCR: PSM fills both sides, BCR fills the single-number slot (bcr36), and the
+ * 12/24-month BCR stay NaN. The original values are kept in legacyPredictions.
+ */
+function fromLegacy(L: LegacyPredictions, S: ClinicalState): CompassPredictions {
+  return {
+    ece: L.ece, svi: L.svi, upgrade: L.upgrade,
+    psmL: L.psm, psmR: L.psm,
+    bcr12: NaN, bcr24: NaN, bcr36: L.bcr,
+    lni: L.lni, extensive: L.extensive,
+    nsL: L.nsL, nsR: L.nsR, eceL: L.eceL, eceR: L.eceR, sviL: L.sviL, sviR: L.sviR,
+    nsDetailL: L.nsDetailL, nsDetailR: L.nsDetailR,
+    inflammation: predictInflammationRisk(S),
+    plan: buildSurgicalPlan(S, L.nsDetailL, L.nsDetailR, L.sviL, L.sviR, L.eceL, L.eceR),
+  };
+}
 
 const STORAGE_KEY = "compass-digital-twin-state";
 // Bump this version whenever the blank-slate default changes so stale
@@ -72,6 +107,10 @@ interface PatientState {
    * missing, or an imaging-status conflict. Empty when predictions exist.
    */
   missingRequired: RequiredInputProblem[];
+  /** Engine in use, and the raw v22 output when it is "v22" (null otherwise). */
+  modelSet: ModelSet;
+  legacyPredictions: LegacyPredictions | null;
+  setModelSet: (m: ModelSet) => void;
   threeZones: ThreeZoneRuntime[];
   loading: boolean;
   history: string[];
@@ -175,7 +214,15 @@ export const usePatientStore = create<PatientState>()((set, get) => ({
     activeId: null,
     predictions: null,
     missingRequired: [],
+    modelSet: readModelSet(),
+    legacyPredictions: null,
     threeZones: createBaseThreeZones(),
+
+    setModelSet: (m) => {
+      try { localStorage.setItem(MODEL_SET_KEY, m); } catch { /* private mode */ }
+      set({ modelSet: m });
+      get().recompute();
+    },
     loading: true,
     history: [],
     historyIndex: -1,
@@ -271,7 +318,7 @@ export const usePatientStore = create<PatientState>()((set, get) => ({
       const { patients, activeId } = get();
       const entry = patients.find((p) => p.id === activeId);
       if (!entry) {
-        set({ predictions: null, missingRequired: [], threeZones: createBaseThreeZones() });
+        set({ predictions: null, legacyPredictions: null, missingRequired: [], threeZones: createBaseThreeZones() });
         return;
       }
       const record = clone(entry.record);
@@ -279,18 +326,29 @@ export const usePatientStore = create<PatientState>()((set, get) => ({
       record.lesions = entry.lesionRows;
       const S0 = clinicalStateFromRecord(record);
       const S = deriveClinicalFromLesions(S0, lesionsFromRows(entry.lesionRows));
+      // Original engine: runs as it did in May (its own defaults, no required-input gate).
+      if (get().modelSet === "v22") {
+        const L = runLegacy(entry.record, entry.lesionRows);
+        const predictions = fromLegacy(L.predictions, S);
+        const threeZones = L.threeZones.map((z) => ({
+          ...z,
+          planGrade: (z.side === "L" ? predictions.plan.left : predictions.plan.right).nsGrade,
+        }));
+        set({ predictions, legacyPredictions: L.predictions, missingRequired: [], threeZones });
+        return;
+      }
       // No PSA, volume or grade group: no predictions at all, rather than
       // predictions from invented defaults. Every panel already handles null.
       const gate = validateVNextRequiredInputs(S);
       if (!gate.ok) {
-        set({ predictions: null, missingRequired: gate.problems, threeZones: createBaseThreeZones() });
+        set({ predictions: null, legacyPredictions: null, missingRequired: gate.problems, threeZones: createBaseThreeZones() });
         return;
       }
       mapLesionsToZones(record.zones, entry.lesionRows, S);
       const working: Prostate3DInputV1 = { ...record, zones: record.zones };
       const threeZones = clone(createBaseThreeZones());
       const predictions = runCompassModels(S, working, entry.lesionRows, threeZones);
-      set({ predictions, missingRequired: [], threeZones });
+      set({ predictions, legacyPredictions: null, missingRequired: [], threeZones });
     },
 
     computeEntryPredictions: (entry) => {
@@ -299,6 +357,9 @@ export const usePatientStore = create<PatientState>()((set, get) => ({
       record.lesions = entry.lesionRows;
       const S0 = clinicalStateFromRecord(record);
       const S = deriveClinicalFromLesions(S0, lesionsFromRows(entry.lesionRows));
+      if (get().modelSet === "v22") {
+        return { S, predictions: fromLegacy(runLegacy(entry.record, entry.lesionRows).predictions, S) };
+      }
       mapLesionsToZones(record.zones, entry.lesionRows, S);
       const working: Prostate3DInputV1 = { ...record, zones: record.zones };
       const threeZones = clone(createBaseThreeZones());

@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { MissingInputsNotice } from "@/components/MissingInputsNotice";
+import { LegacyPredictionPanel } from "@/legacy/components/LegacyPredictionPanel";
 import {
   Card,
   CardContent,
@@ -98,6 +99,10 @@ export function PredictionPanel() {
   const activeId = usePatientStore((s) => s.activeId);
   const entry = patients.find((p) => p.id === activeId);
   const setExplainKey = useUiStore((s) => s.setExplainKey);
+  const modelSet = usePatientStore((s) => s.modelSet);
+
+  // Original (v22) engine: Daniel's May 13 predictions panel, reading the v22 output.
+  if (modelSet === "v22") return <LegacyPredictionPanel />;
 
   if (!predictions && entry && missingRequired.length > 0) {
     return <MissingInputsNotice />;
